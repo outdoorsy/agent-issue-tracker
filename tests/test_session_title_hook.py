@@ -265,3 +265,62 @@ def test_fresh_transcript_has_no_idle_marker(project, hook_env):
     )
     t = title_of(run_hook(payload_for(project), hook_env))
     assert t == "WB-7657 subscription-gates"
+
+
+# --- Task 5: epic enrichment ----------------------------------------------------
+
+EPIC_JSON = json.dumps([{
+    "number": 42,
+    "title": "epic: board support",
+    "body": (
+        "intro\n"
+        "- **Phase:** Phase 1 · 1/3 sub-issues closed\n"
+        "- **Next up:** #61 — webhook retries\n"
+        "- **Current branch:** feat/board-support\n"
+        "- **Last updated:** 2026-07-01\n"
+    ),
+}])
+
+
+@pytest.fixture
+def gh_stub(tmp_path, hook_env):
+    calls = tmp_path / "gh-calls"
+    data = tmp_path / "gh.json"
+    data.write_text(EPIC_JSON)
+    stub_bin = make_stub(
+        tmp_path, "gh", 'echo "$@" >> "$GH_STUB_CALLS"\ncat "$GH_STUB_JSON"'
+    )
+    hook_env["GH_STUB_CALLS"] = str(calls)
+    hook_env["GH_STUB_JSON"] = str(data)
+    return stub_bin, calls
+
+
+def test_epic_match_replaces_ref_and_adds_next(project, hook_env, gh_stub):
+    stub_bin, _ = gh_stub
+    git(project, "switch", "-c", "feat/board-support")
+    t = title_of(run_hook(payload_for(project), hook_env, stub_bin=stub_bin))
+    assert t == "#42 board-support · next #61"
+
+
+def test_epic_lookup_is_cached(project, hook_env, gh_stub):
+    stub_bin, calls = gh_stub
+    git(project, "switch", "-c", "feat/board-support")
+    run_hook(payload_for(project, session_id="c1"), hook_env, stub_bin=stub_bin)
+    run_hook(payload_for(project, session_id="c2"), hook_env, stub_bin=stub_bin)
+    assert len(calls.read_text().splitlines()) == 1
+
+
+def test_no_epic_match_keeps_branch_title(project, hook_env, gh_stub):
+    stub_bin, _ = gh_stub
+    git(project, "switch", "-c", "max/WB-7657-subscription-gates")
+    t = title_of(run_hook(payload_for(project), hook_env, stub_bin=stub_bin))
+    assert t == "WB-7657 subscription-gates"
+
+
+def test_gh_failure_fails_open(project, hook_env, tmp_path):
+    # feat/board-support carries no ref shape of its own, so with gh broken
+    # there is no enrichment and no base ref → the hook must emit nothing.
+    stub_bin = make_stub(tmp_path, "gh", "exit 1")
+    git(project, "switch", "-c", "feat/board-support")
+    t = title_of(run_hook(payload_for(project), hook_env, stub_bin=stub_bin))
+    assert t is None

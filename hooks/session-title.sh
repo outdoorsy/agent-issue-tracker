@@ -99,8 +99,45 @@ if [ -z "$ref" ] && [ -f "$transcript_path" ]; then
   slug=""
 fi
 
-# --- stage 6: epic enrichment (populated in a later task) ----------------------
+# --- stage 6: epic enrichment (GitHub backend only; 24h cache; read-only) -------
 epic_next=""
+backend="$(grep -E '^backend:' "$config" 2>/dev/null | head -1 | awk '{print $2}')" || backend=""
+if [ "$backend" = "github" ] && [ -n "$branch" ] && command -v gh >/dev/null 2>&1; then
+  cache_dir="$state_dir/epic-cache"
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  key="$(printf '%s|%s' "${toplevel:-$cwd}" "$branch" | hash_key | cut -c1-16)"
+  cache_file="$cache_dir/$key"
+  fresh=""
+  if [ -f "$cache_file" ]; then
+    cm="$(file_mtime "$cache_file")" || cm=0
+    [ $(($(date +%s) - cm)) -lt 86400 ] && fresh=1
+  fi
+  if [ -z "$fresh" ]; then
+    epics_json="$(cd "$cwd" && tmo 5 gh issue list --label epic --state open \
+      --json number,title,body --limit 50 2>/dev/null)" || epics_json=""
+    if [ -n "$epics_json" ]; then
+      printf '%s' "$epics_json" | jq -r --arg b "$branch" '
+        [.[] | select(.body | contains("- **Current branch:** " + $b))][0] // empty
+        | [("#" + (.number | tostring)), .title,
+           ((.body | capture("- \\*\\*Next up:\\*\\* (?<n>[^\n]+)").n) // "")]
+        | @tsv' >"$cache_file" 2>/dev/null || : >"$cache_file"
+    else
+      : >"$cache_file"
+    fi
+  fi
+  if [ -s "$cache_file" ]; then
+    e_ref="$(cut -f1 "$cache_file" 2>/dev/null)"
+    e_title="$(cut -f2 "$cache_file" 2>/dev/null)"
+    e_next_line="$(cut -f3 "$cache_file" 2>/dev/null)"
+    if [ -n "$e_ref" ]; then
+      ref="$e_ref"
+      slug="$(printf '%s' "$e_title" | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/^epic: *//; s/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-24)"
+      epic_next="$(printf '%s' "$e_next_line" \
+        | grep -oE '(#[0-9]+|[A-Z][A-Z0-9]+-[0-9]+)' | head -1)" || true
+    fi
+  fi
+fi
 
 # --- stage 7: AI tail (populated in a later task) -------------------------------
 ai_tail=""
