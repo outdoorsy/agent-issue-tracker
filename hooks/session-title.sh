@@ -117,7 +117,7 @@ if [ "$backend" = "github" ] && [ -n "$branch" ] && command -v gh >/dev/null 2>&
       --json number,title,body --limit 50 2>/dev/null)" || epics_json=""
     if [ -n "$epics_json" ]; then
       printf '%s' "$epics_json" | jq -r --arg b "$branch" '
-        [.[] | select(.body | contains("- **Current branch:** " + $b))][0] // empty
+        [.[] | select(any(.body | split("\n")[]; rtrimstr("\r") == ("- **Current branch:** " + $b)))][0] // empty
         | [("#" + (.number | tostring)), .title,
            ((.body | capture("- \\*\\*Next up:\\*\\* (?<n>[^\n]+)").n) // "")]
         | @tsv' >"$cache_file" 2>/dev/null || : >"$cache_file"

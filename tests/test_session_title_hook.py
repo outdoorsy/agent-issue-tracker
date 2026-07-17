@@ -318,9 +318,33 @@ def test_no_epic_match_keeps_branch_title(project, hook_env, gh_stub):
 
 
 def test_gh_failure_fails_open(project, hook_env, tmp_path):
-    # feat/board-support carries no ref shape of its own, so with gh broken
-    # there is no enrichment and no base ref → the hook must emit nothing.
-    stub_bin = make_stub(tmp_path, "gh", "exit 1")
+    # gh gets called once, fails; the hook must negative-cache and emit nothing.
+    calls = tmp_path / "gh-calls"
+    stub_bin = make_stub(tmp_path, "gh", 'echo "$@" >> "$GH_STUB_CALLS"\nexit 1')
+    hook_env["GH_STUB_CALLS"] = str(calls)
+    git(project, "switch", "-c", "feat/board-support")
+    r = run_hook(payload_for(project), hook_env, stub_bin=stub_bin)
+    assert r.returncode == 0 and r.stdout == ""
+    assert len(calls.read_text().splitlines()) == 1
+
+
+def test_prefix_branch_does_not_match_epic(project, hook_env, tmp_path):
+    # Epic pins "feat/board-support-extended"; session is on "feat/board-support".
+    # Substring matching would wrongly attach the epic; line-exact must not.
+    calls = tmp_path / "gh-calls"
+    data = tmp_path / "gh.json"
+    data.write_text(json.dumps([{
+        "number": 42,
+        "title": "epic: board support",
+        "body": "- **Next up:** #61 — webhook retries\n"
+                "- **Current branch:** feat/board-support-extended\n",
+    }]))
+    stub_bin = make_stub(
+        tmp_path, "gh", 'echo "$@" >> "$GH_STUB_CALLS"\ncat "$GH_STUB_JSON"'
+    )
+    hook_env["GH_STUB_CALLS"] = str(calls)
+    hook_env["GH_STUB_JSON"] = str(data)
     git(project, "switch", "-c", "feat/board-support")
     t = title_of(run_hook(payload_for(project), hook_env, stub_bin=stub_bin))
-    assert t is None
+    assert t is None          # no epic match, and the branch has no ref shape of its own
+    assert calls.exists()     # stage 6 really ran and called gh
