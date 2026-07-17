@@ -421,3 +421,26 @@ def test_cap_drops_overflowing_part_and_after(project, hook_env, tmp_path):
     t = title_of(run_hook(payload_for(project, source="resume"), ai_env(hook_env), stub_bin=stub))
     # anchor (31) + tail (32) + separators > 64 → tail and idle both dropped.
     assert t == "WB-7657 subscription-gates-and-b"
+
+
+def test_rambling_long_output_is_rejected_pre_cut(project, hook_env, tmp_path):
+    # 9 words / 74 chars: cutting to 40 chars first drops it to 4 space-delimited
+    # tokens, which a post-cut wc -w would wrongly accept. Use a short anchor
+    # ("#88", 3 chars) so the accepted-but-wrong 40-char tail would still fit
+    # under the 64-char title cap and surface in the output — with a long
+    # anchor (e.g. "WB-7657 subscription-gates") the stage-9 cap independently
+    # discards any 40-char tail regardless of the word-count bug, masking it.
+    phrase = "implementation rolled subscription billing gate live now everywhere across"
+    git(project, "switch", "-c", "issue-88")
+    (project / "transcript.jsonl").write_text(TRANSCRIPT)
+    stub = claude_stub(tmp_path, phrase)
+    t = title_of(run_hook(payload_for(project, source="resume"), ai_env(hook_env), stub_bin=stub))
+    assert t == "#88"
+
+
+def test_quotes_and_trailing_period_are_stripped(project, hook_env, tmp_path):
+    git(project, "switch", "-c", "max/WB-7657-subscription-gates")
+    (project / "transcript.jsonl").write_text(TRANSCRIPT)
+    stub = claude_stub(tmp_path, "\\\"wiring board webhook.\\\"")
+    t = title_of(run_hook(payload_for(project, source="resume"), ai_env(hook_env), stub_bin=stub))
+    assert t == "WB-7657 subscription-gates · wiring board webhook"
