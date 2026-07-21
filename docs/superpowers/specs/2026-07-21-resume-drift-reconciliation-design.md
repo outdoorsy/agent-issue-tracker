@@ -164,7 +164,8 @@ Drift report — #123 engine/operator split
   ⚠ probe: 4 items present but unenumerated:
       Tests/AccountTests.swift
       Tests/BillingTests.swift
-      …and 2 more
+      Tests/CheckoutTests.swift
+      Tests/InventoryTests.swift
   → mirror findings: reconcile via initiative-tracking's adoption procedure (tracker wins)
   → unenumerated items: file follow-ups? [all / pick / none]
 ```
